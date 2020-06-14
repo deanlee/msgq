@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <map>
+#include <time.h>
 #include <string>
 #include <vector>
 #include <capnp/serialize.h>
@@ -89,4 +90,41 @@ class PubMaster {
 
  private:
   std::map<std::string, PubSocket *> sockets_;
+};
+
+class MessageReader : public capnp::FlatArrayMessageReader {
+ public:
+  MessageReader(const char *data, const size_t size) : capnp::FlatArrayMessageReader(copyBytes(data, size)) {}
+
+ private:
+  kj::ArrayPtr<capnp::word> copyBytes(const char *data, const size_t size) {
+    array_ = kj::heapArray<capnp::word>((size / sizeof(capnp::word)) + 1);
+    memcpy(array_.begin(), data, size);
+    return array_.asPtr();
+  }
+  kj::Array<capnp::word> array_;
+};
+
+class MessageBuilder : public capnp::MallocMessageBuilder {
+ public:
+  MessageBuilder() : buffer_{}, capnp::MallocMessageBuilder(kj::ArrayPtr<capnp::word>(buffer_, 1024)) {}
+
+  cereal::Event::Builder initEvent(bool valid = true) {
+    cereal::Event::Builder event = initRoot<cereal::Event>();
+    struct timespec t;
+    clock_gettime(CLOCK_BOOTTIME, &t);
+    uint64_t current_time = t.tv_sec * 1000000000ULL + t.tv_nsec;
+    event.setLogMonoTime(current_time);
+    event.setValid(valid);
+    return event;
+  }
+
+  kj::ArrayPtr<capnp::byte> toBytes(){
+    heapArray_ = capnp::messageToFlatArray(*this);
+    return heapArray_.asBytes();
+  }
+  
+ private:
+  alignas(8) capnp::word buffer_[1024];
+  kj::Array<capnp::word> heapArray_;
 };
