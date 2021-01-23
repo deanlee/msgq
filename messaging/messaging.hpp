@@ -110,13 +110,39 @@ private:
   kj::Array<capnp::word> heapArray_;
 };
 
+class MessageOutputStream : public kj::OutputStream {
+public:
+  inline void clear() { bytes.clear(); }
+  inline kj::ArrayPtr<capnp::byte> asPtr() { return bytes.asPtr(); }
+  inline void write(const void *buffer, size_t size) override {
+    bytes.addAll(kj::arrayPtr(reinterpret_cast<const capnp::byte *>(buffer), size));
+  }
+  inline void write(kj::ArrayPtr<const kj::ArrayPtr<const capnp::byte>> pieces) override {
+    for (auto &piece : pieces) bytes.addAll(piece);
+  }
+
+private:
+  kj::Vector<capnp::byte> bytes;
+};
+
+inline void writeMessage(MessageOutputStream &output, MessageBuilder& builder) {
+  output.clear();
+  capnp::writeMessage(output, builder);
+}
+
 class PubMaster {
 public:
   PubMaster(const std::initializer_list<const char *> &service_list);
-  inline int send(const char *name, capnp::byte *data, size_t size) { return sockets_.at(name)->send((char *)data, size); }
+  inline int send(const char *name, capnp::byte *data, size_t size) {
+    return sockets_.at(name)->sock->send((char *)data, size);
+  }
   int send(const char *name, MessageBuilder &msg);
   ~PubMaster();
 
 private:
-  std::map<std::string, PubSocket *> sockets_;
+  struct SocketWriter {
+    PubSocket *sock;
+    MessageOutputStream stream;
+  };
+  std::map<std::string, SocketWriter *> sockets_;
 };

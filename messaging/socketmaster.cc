@@ -156,12 +156,14 @@ PubMaster::PubMaster(const std::initializer_list<const char *> &service_list) {
     assert(get_service(name) != nullptr);
     PubSocket *socket = PubSocket::create(ctx.ctx_, name);
     assert(socket);
-    sockets_[name] = socket;
+    sockets_[name] = new SocketWriter{.sock = socket};
   }
 }
 
 int PubMaster::send(const char *name, MessageBuilder &msg) {
-  auto bytes = msg.toBytes();
+  SocketWriter *s = sockets_.at(name);
+  writeMessage(s->stream, msg);
+  auto bytes = s->stream.asPtr();
   return send(name, bytes.begin(), bytes.size());
 }
 
