@@ -63,6 +63,34 @@ public:
   virtual ~Poller(){};
 };
 
+class AlignedBuffer {
+ public:
+  AlignedBuffer() = default;
+  AlignedBuffer(const char *data, const size_t size) { aligned(data, size); }
+
+  kj::ArrayPtr<const capnp::word> aligned(const char *data, const size_t size) {
+    if (reinterpret_cast<uintptr_t>(data) % sizeof(void *) == 0) {
+      // data is aligned.
+      words_ = kj::ArrayPtr<const capnp::word>(reinterpret_cast<const capnp::word *>(data), size / sizeof(capnp::word));
+    } else {
+      // data not aligned. Make a copy.
+      const size_t words_size = size / sizeof(capnp::word);
+      if (alignedBuffer_.size() < words_size) {
+        alignedBuffer_ = kj::heapArray<capnp::word>(words_size);
+      }
+      memcpy(alignedBuffer_.begin(), data, words_size * sizeof(capnp::word));
+      words_ = alignedBuffer_.slice(0, words_size);
+    }
+    return words_;
+  }
+
+  inline operator kj::ArrayPtr<const capnp::word>() { return words_; }
+
+ private:
+  kj::Array<capnp::word> alignedBuffer_;
+  kj::ArrayPtr<const capnp::word> words_;
+};
+
 class SubMaster {
 public:
   SubMaster(const std::initializer_list<const char *> &service_list,
