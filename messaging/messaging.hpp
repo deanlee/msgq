@@ -1,8 +1,10 @@
 #pragma once
 #include <cstddef>
+#include <time.h>
 #include <map>
 #include <string>
 #include <vector>
+#include <kj/common.h>
 #include <capnp/serialize.h>
 #include "../gen/cpp/log.capnp.h"
 
@@ -63,6 +65,56 @@ public:
   virtual ~Poller(){};
 };
 
+// class AlignedArray {
+//  public:
+//   AlignedArray(const char *data, const size_t size) {
+//     if (reinterpret_cast<uintptr_t>(data) % sizeof(void *) == 0) {
+//       // Hooray, data is aligned.
+//       words_ = kj::ArrayPtr<const capnp::word>(reinterpret_cast<const capnp::word *>(data), size / sizeof(capnp::word));
+//     } else {
+//       // Ugh, data not aligned. Make a copy.
+//       printf("*****data is not aligned****\n");
+//       // Technically we don't know if the bytes are aligned so we'd better copy them to a new
+//       // array.  Note that if we have a non-whole number of words we chop off the straggler bytes.
+//       // This is fine because if those bytes are actually part of the message we will hit an error
+//       // later and if they are not then who cares?
+//       const size_t words_size = size / sizeof(capnp::word);
+//       alignedBuffer_ = kj::heapArray<capnp::word>(words_size);
+//       memcpy(alignedBuffer_.begin(), data, words_size * sizeof(capnp::word));
+//       words_ = alignedBuffer_;
+//     }
+//   }
+//   inline operator kj::ArrayPtr<const capnp::word>() { return words_; }
+//   ~AlignedArray() {}
+
+//  private:
+//   kj::Array<capnp::word> alignedBuffer_;
+//   kj::ArrayPtr<const capnp::word> words_;
+// };
+
+// class SubMessage {
+// public:
+//   SubMessage(const char *name, const char *address = NULL, int timeout = -1, bool conflate = false);
+//   bool receive(bool non_blocking = false);
+//   const cereal::Event::Reader &getEvent() { return event; };
+//   void drain();
+//   ~SubMessage();
+
+// private:
+//   friend class SubMaster;
+//   std::string name;
+//   SubSocket *socket = nullptr;
+//   void *allocated_msg_reader = nullptr;
+//   capnp::FlatArrayMessageReader *msg_reader = nullptr;
+//   kj::Array<capnp::word> buf;
+//   cereal::Event::Reader event;
+
+//   // used by class SubMaster
+//   int freq = 0;
+//   bool updated = false, alive = false, valid = false, ignore_alive;
+//   uint64_t rcv_time = 0, rcv_frame = 0;
+// };
+
 class SubMaster {
 public:
   SubMaster(const std::initializer_list<const char *> &service_list,
@@ -87,9 +139,98 @@ private:
   std::map<std::string, SubMessage *> services_;
 };
 
-class MessageBuilder : public capnp::MallocMessageBuilder {
-public:
-  MessageBuilder() = default;
+// class SubMessage {
+//  public:
+//   SubMessage(const char *name, const char *address = NULL, bool conflate = false);
+//   void setTimeout(int timeout) { socket_->setTimeout(timeout); }
+//   bool receive(bool non_blocking = false);
+//   const cereal::Event::Reader &getEvent() { return event_; };
+//   void drain();
+//   ~SubMessage();
+
+//  private:
+//   friend class SubMaster;
+//   std::string name_;
+//   SubSocket *socket_ = nullptr;
+//   void *allocated_msg_reader_ = nullptr;
+//   capnp::FlatArrayMessageReader *msg_reader_ = nullptr;
+//   kj::Array<capnp::word> alignedBuffer_;
+//   cereal::Event::Reader event_;
+//   Message * msg_ = nullptr;
+// };
+
+// class SubMaster {
+// public:
+//   SubMaster(const std::initializer_list<const char *> &service_list,
+//             const char *address = nullptr, const std::initializer_list<const char *> &ignore_alive = {});
+//   int update(int timeout = 1000);
+//   inline bool allAlive(const std::initializer_list<const char *> &service_list = {}) { return all_(service_list, false, true); }
+//   inline bool allValid(const std::initializer_list<const char *> &service_list = {}) { return all_(service_list, true, false); }
+//   inline bool allAliveAndValid(const std::initializer_list<const char *> &service_list = {}) { return all_(service_list, true, true); }
+//   void drain();
+//   const cereal::Event::Reader &operator[](const char *name);
+//   ~SubMaster();
+
+//   uint64_t frame = 0;
+//   bool updated(const char *name) const;
+//   uint64_t rcv_frame(const char *name) const;
+
+// private:
+//   bool all_(const std::initializer_list<const char *> &service_list, bool valid, bool alive);
+//   Poller *poller_ = nullptr;
+//   struct Message;
+//   std::map<SubSocket *, SubMaster::Message *> messages_;
+//   std::map<std::string, SubMaster::Message *> services_;
+// };
+
+// class SubMaster {
+//  public:
+//   SubMaster(const std::initializer_list<const char *> &service_list,
+//             const char *address = nullptr, const std::initializer_list<const char *> &ignore_alive = {});
+//   int update(int timeout = 1000);
+//   inline bool allAlive(const std::initializer_list<const char *> &service_list = {}) { return all_(service_list, false, true); }
+//   inline bool allValid(const std::initializer_list<const char *> &service_list = {}) { return all_(service_list, true, false); }
+//   inline bool allAliveAndValid(const std::initializer_list<const char *> &service_list = {}) { return all_(service_list, true, true); }
+//   bool updated(const char *name) const;
+//   void drain();
+//   cereal::Event::Reader &operator[](const char *name);
+//   ~SubMaster();
+
+//  private:
+//   bool all_(const std::initializer_list<const char *> &service_list, bool valid, bool alive);
+//   Poller *poller_ = nullptr;
+//   uint64_t frame_ = 0;
+//   struct SubMessage;
+//   std::map<SubSocket *, SubMessage *> messages_;
+//   std::map<std::string, SubMessage *> services_;
+// };
+
+
+#define STACK_SEGEMENT_WORD_SIZE 512
+class MessageBuilder : public capnp::MessageBuilder {
+ public:
+  MessageBuilder() : firstSegment(true), nextMallocSize(2048), stackSegment{} {}
+
+  ~MessageBuilder() {
+    for (auto ptr : moreSegments) {
+      free(ptr);
+    }
+  }
+
+  kj::ArrayPtr<capnp::word> allocateSegment(uint minimumSize) {
+    if (firstSegment) {
+      firstSegment = false;
+      uint size = kj::max(minimumSize, STACK_SEGEMENT_WORD_SIZE);
+      if (size <= STACK_SEGEMENT_WORD_SIZE) {
+        return kj::ArrayPtr<capnp::word>(stackSegment + 1, size);
+      }
+    }
+    uint size = kj::max(minimumSize, nextMallocSize);
+    capnp::word *result = (capnp::word *)calloc(size, sizeof(capnp::word));
+    moreSegments.push_back(result);
+    nextMallocSize += size;
+    return kj::ArrayPtr<capnp::word>(result, size);
+  }
 
   cereal::Event::Builder initEvent(bool valid = true) {
     cereal::Event::Builder event = initRoot<cereal::Event>();
@@ -101,14 +242,51 @@ public:
     return event;
   }
 
-  kj::ArrayPtr<capnp::byte> toBytes() {
-    heapArray_ = capnp::messageToFlatArray(*this);
-    return heapArray_.asBytes();
+  kj::ArrayPtr<kj::byte> toBytes() {
+    auto segments = getSegmentsForOutput();
+    if (segments.size() == 1 && segments[0].begin() == stackSegment + 1) {
+      const size_t segment_size = segments[0].size();
+      uint32_t *table = (uint32_t *)stackSegment;
+      table[0] = 0;
+      table[1] = segment_size;
+      return kj::ArrayPtr<capnp::word>(stackSegment, segment_size + 1).asBytes();
+    } else {
+      array = capnp::messageToFlatArray(segments);
+      return array.asBytes();
+    }
   }
 
-private:
-  kj::Array<capnp::word> heapArray_;
+ protected:
+  kj::Array<capnp::word> array;
+  std::vector<capnp::word *> moreSegments;
+  bool firstSegment;
+  size_t nextMallocSize;
+  // the first word of stackSegment is used internally to set the head table.
+  alignas(void *) capnp::word stackSegment[1 + STACK_SEGEMENT_WORD_SIZE];
 };
+
+// class MessageBuilder : public capnp::MallocMessageBuilder {
+//  public:
+//   MessageBuilder() = default;
+
+//   cereal::Event::Builder initEvent(bool valid = true) {
+//     cereal::Event::Builder event = initRoot<cereal::Event>();
+//     struct timespec t;
+//     clock_gettime(CLOCK_BOOTTIME, &t);
+//     uint64_t current_time = t.tv_sec * 1000000000ULL + t.tv_nsec;
+//     event.setLogMonoTime(current_time);
+//     event.setValid(valid);
+//     return event;
+//   }
+
+//   kj::ArrayPtr<capnp::byte> toBytes() {
+//     heapArray_ = capnp::messageToFlatArray(*this);
+//     return heapArray_.asBytes();
+//   }
+
+//  private:
+//   kj::Array<capnp::word> heapArray_;
+// };
 
 class PubMaster {
 public:
