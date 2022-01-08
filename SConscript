@@ -13,6 +13,9 @@ env.Command(["gen/c/include/c++.capnp.h"], [], "mkdir -p " + gen_dir.path + "/c/
 env.Command([f'gen/cpp/{s}.c++' for s in schema_files] + [f'gen/cpp/{s}.h' for s in schema_files],
             schema_files,
             f"capnpc --src-prefix={cereal_dir.path} $SOURCES -o c++:{gen_dir.path}/cpp/")
+env.Command([f'gen/cpp/{s}.pyx' for s in schema_files],
+            schema_files,
+            f"capnp compile --import-path={cereal_dir.path} $SOURCES -ocython:{gen_dir.path}/cpp/")
 
 # TODO: remove non shared cereal and messaging
 cereal_objects = env.SharedObject([f'gen/cpp/{s}.c++' for s in schema_files])

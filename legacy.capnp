@@ -383,8 +383,8 @@ struct NavUpdate @0xdb98be6565516acb {
   }
 
   struct Segment @0xa5b39b4fc4d7da3f {
-    from @0 :LatLng;
-    to @1 :LatLng;
+    fromStart @0 :LatLng;
+    toStart @1 :LatLng;
     updateTime @2 :Int32;
     distance @3 :Int32;
     crossTime @4 :Int32;

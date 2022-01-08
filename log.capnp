@@ -8,11 +8,11 @@ using Legacy = import "legacy.capnp";
 
 const logVersion :Int32 = 1;
 
-struct Map(Key, Value) {
+struct Map {
   entries @0 :List(Entry);
   struct Entry {
-    key @0 :Key;
-    value @1 :Value;
+    key @0 :Text;
+    value @1 :Text;
   }
 }
 
@@ -30,13 +30,13 @@ struct InitData {
   gitBranch @11 :Text;
   gitRemote @13 :Text;
 
-  androidProperties @16 :Map(Text, Text);
+  androidProperties @16 :Map;
 
   pandaInfo @8 :PandaInfo;
 
   dirty @9 :Bool;
   passive @12 :Bool;
-  params @17 :Map(Text, Data);
+  params @17 :Map;
 
   enum DeviceType {
     unknown @0;
@@ -105,7 +105,7 @@ struct InitData {
   }
 
   struct ChffrAndroidExtra {
-    allCameraCharacteristics @0 :Map(Text, Text);
+    allCameraCharacteristics @0 :Map;
   }
 
   struct IosBuildInfo {
@@ -1298,8 +1298,8 @@ struct DriverMonitoringState @0xb83cda094a1da284 {
 
 struct Boot {
   wallTimeNanos @0 :UInt64;
-  pstore @4 :Map(Text, Data);
-  commands @5 :Map(Text, Data);
+  pstore @4 :Map;
+  commands @5 :Map;
   launchLog @3 :Text;
 
   lastKmsgDEPRECATED @1 :Data;
