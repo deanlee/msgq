@@ -30,6 +30,7 @@ messaging_objects = env.SharedObject([
   'messaging/impl_msgq.cc',
   'messaging/msgq.cc',
   'messaging/socketmaster.cc',
+  'messaging/semaphore.cc',
 ])
 
 messaging_lib = env.Library('messaging', messaging_objects)
