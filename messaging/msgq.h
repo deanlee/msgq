@@ -1,9 +1,12 @@
 #pragma once
+#include <errno.h>
+#include <fcntl.h>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <atomic>
-
+#include <mutex>
+#include <semaphore.h>
 #define DEFAULT_SEGMENT_SIZE (10 * 1024 * 1024)
 #define NUM_READERS 10
 #define ALIGN(n) ((n + (8 - 1)) & -8)
@@ -18,6 +21,24 @@ struct  msgq_header_t {
   uint64_t read_pointers[NUM_READERS];
   uint64_t read_valids[NUM_READERS];
   uint64_t read_uids[NUM_READERS];
+};
+
+class Semaphore {
+ public:
+  Semaphore(std::string name) {
+    sem = sem_open(name.c_str(), O_CREAT | O_RDWR, 0660, 1);
+    assert(sem != SEM_FAILED);
+  }
+  ~Semaphore() {
+    sem_destroy(sem);
+  }
+  void lock() {
+    sem_wait(sem);
+  }
+  void unlock() {
+    sem_post(sem);
+  }
+  sem_t *sem;
 };
 
 struct msgq_queue_t {
@@ -36,6 +57,7 @@ struct msgq_queue_t {
 
   bool read_conflate;
   std::string endpoint;
+  Semaphore *sem;
 };
 
 struct msgq_msg_t {

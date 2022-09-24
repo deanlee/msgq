@@ -24,6 +24,9 @@
 
 #include "msgq.h"
 
+#include <semaphore.h>
+
+
 void sigusr2_handler(int signal) {
   assert(signal == SIGUSR2);
 }
@@ -83,6 +86,7 @@ void msgq_wait_for_subscriber(msgq_queue_t *q){
 }
 
 int msgq_new_queue(msgq_queue_t * q, const char * path, size_t size){
+
   assert(size < 0xFFFFFFFF); // Buffer must be smaller than 2^32 bytes
   std::signal(SIGUSR2, sigusr2_handler);
 
@@ -169,7 +173,8 @@ static void thread_signal(uint32_t tid) {
 void msgq_init_subscriber(msgq_queue_t * q) {
   assert(q != NULL);
   assert(q->num_readers != NULL);
-
+  q->sem = new Semaphore(q->endpoint + "lock");
+  std::lock_guard(*q->sem);
   uint64_t uid = msgq_get_uid();
 
   // Get reader id

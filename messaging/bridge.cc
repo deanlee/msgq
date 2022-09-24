@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
     poller->registerSocket(sub_sock);
     sub2pub[sub_sock] = pub_sock;
   }
-
+  int i = 0;
   while (!do_exit) {
     for (auto sub_sock : poller->poll(100)) {
       Message * msg = sub_sock->receive();
@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
       int ret;
       do {
         ret = sub2pub[sub_sock]->sendMessage(msg);
+        if (++i==1) printf("msg\n");
       } while (ret == -1 && errno == EINTR && !do_exit);
       assert(ret >= 0 || do_exit);
       delete msg;
