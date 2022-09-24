@@ -456,9 +456,7 @@ int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
   };
 
   signal_handler.msgq_do_exit = false;
-  if (timeout < 0) {
-    timeout = 1 * 24 * 60 * 60 * 1000; // 1 day
-  }
+  if (timeout < 0) timeout = 1 * 24 * 60 * 60 * 1000; // 1 day
 
   int num = msg_ready();
   while (num == 0 && timeout > 0 && !signal_handler.msgq_do_exit) {
