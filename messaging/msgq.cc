@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <chrono>
 #include <algorithm>
+#include <condition_variable>
 #include <cstdlib>
 #include <csignal>
+#include <mutex>
 #include <random>
 #include <string>
 
@@ -24,8 +26,18 @@
 
 #include "msgq.h"
 
+std::mutex poll_mutex;
+std::condition_variable poll_cv;
+
 void sigusr2_handler(int signal) {
   assert(signal == SIGUSR2);
+  poll_cv.notify_all();
+}
+
+static inline double millis_since_boot() {
+  struct timespec t;
+  clock_gettime(CLOCK_BOOTTIME, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec * 1e-6;
 }
 
 uint64_t msgq_get_uid(void){
@@ -414,40 +426,23 @@ int msgq_msg_recv(msgq_msg_t * msg, msgq_queue_t * q){
   return msg->size;
 }
 
-
-
-int msgq_poll(msgq_pollitem_t * items, size_t nitems, int timeout){
-  int num = 0;
-
-  // Check if messages ready
-  for (size_t i = 0; i < nitems; i++) {
-    items[i].revents = msgq_msg_ready(items[i].q);
-    if (items[i].revents) num++;
-  }
-
-  int ms = (timeout == -1) ? 100 : timeout;
-  struct timespec ts;
-  ts.tv_sec = ms / 1000;
-  ts.tv_nsec = (ms % 1000) * 1000 * 1000;
-
-
-  while (num == 0) {
-    int ret;
-
-    ret = nanosleep(&ts, &ts);
-
-    // Check if messages ready
+int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
+  auto msg_ready = [=]() {
+    int num = 0;
     for (size_t i = 0; i < nitems; i++) {
-      if (items[i].revents == 0 && msgq_msg_ready(items[i].q)){
-        num += 1;
-        items[i].revents = 1;
-      }
+      items[i].revents = msgq_msg_ready(items[i].q);
+      if (items[i].revents) num++;
     }
+    return num;
+  };
 
-    // exit if we had a timeout and the sleep finished
-    if (timeout != -1 && ret == 0){
-      break;
-    }
+  int num = msg_ready();
+  while (num == 0 && timeout > 0) {
+    double t1 = millis_since_boot();
+    std::unique_lock lk(poll_mutex);
+    poll_cv.wait_for(lk, std::chrono::milliseconds(timeout));
+    num = msg_ready();
+    timeout -= (millis_since_boot() - t1);
   }
 
   return num;
