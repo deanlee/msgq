@@ -26,6 +26,23 @@
 
 #include "msgq.h"
 
+struct MSGQSignalHandler {
+  MSGQSignalHandler() {
+    prev_sigint_handler = std::signal(SIGINT, sig_handler);
+    prev_sigterm_handler = std::signal(SIGTERM, sig_handler);
+  }
+
+  static void sig_handler(int sig) {
+    msgq_do_exit = 1;
+    if (sig == SIGINT && prev_sigint_handler) prev_sigint_handler(sig);
+    if (sig == SIGTERM && prev_sigterm_handler) prev_sigterm_handler(sig);
+  }
+
+  inline static std::atomic<bool> msgq_do_exit = false;
+  inline static sighandler_t prev_sigint_handler = nullptr;
+  inline static sighandler_t prev_sigterm_handler = nullptr;
+};
+
 std::mutex poll_mutex;
 std::condition_variable poll_cv;
 
@@ -427,6 +444,8 @@ int msgq_msg_recv(msgq_msg_t * msg, msgq_queue_t * q){
 }
 
 int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
+  static MSGQSignalHandler signal_handler;
+
   auto msg_ready = [=]() {
     int num = 0;
     for (size_t i = 0; i < nitems; i++) {
@@ -436,8 +455,13 @@ int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
     return num;
   };
 
+  signal_handler.msgq_do_exit = false;
+  if (timeout < 0) {
+    timeout = 1 * 24 * 60 * 60 * 1000; // 1 day
+  }
+
   int num = msg_ready();
-  while (num == 0 && timeout > 0) {
+  while (num == 0 && timeout > 0 && !signal_handler.msgq_do_exit) {
     double t1 = millis_since_boot();
     std::unique_lock lk(poll_mutex);
     poll_cv.wait_for(lk, std::chrono::milliseconds(timeout));
