@@ -1,5 +1,13 @@
 #include "catch2/catch.hpp"
+#include <map>
+#include <thread>
 #include "msgq.h"
+
+static inline double millis_since_boot() {
+  struct timespec t;
+  clock_gettime(CLOCK_BOOTTIME, &t);
+  return t.tv_sec * 1000.0 + t.tv_nsec * 1e-6;
+}
 
 TEST_CASE("ALIGN"){
   REQUIRE(ALIGN(0) == 0);
@@ -392,4 +400,63 @@ TEST_CASE("1 publisher, 2 subscribers", "[integration]"){
     msgq_msg_close(&msg1);
     msgq_msg_close(&msg2);
   }
+}
+
+TEST_CASE("msgq_msg_poll") {
+  const int queue_cnt = 10;
+  const int msg_cnt_per_queue = 100;
+
+  std::vector<msgq_queue_t> writers(queue_cnt);
+  std::vector<msgq_queue_t> readers(queue_cnt);
+  std::vector<msgq_pollitem_t> pollitems(queue_cnt);
+  std::vector<int> messages_received(queue_cnt);
+  for (int i = 0; i < queue_cnt; ++i) {
+    std::string name = "test_queue" + std::to_string(1);
+    remove(std::string("/dev/shm/" + name).c_str());
+    msgq_new_queue(&writers[i], name.c_str(), 1024);
+    msgq_init_publisher(&writers[i]);
+    msgq_new_queue(&readers[i], name.c_str(), 1024);
+    msgq_init_subscriber(&readers[i]);
+    pollitems[i] = {.q = &readers[i]};
+  }
+
+  auto publish_thread = [&]() {
+    for (int i = 0; i < msg_cnt_per_queue; ++i) {
+      for (auto &w : writers) {
+        msgq_msg_t msg;
+        uint64_t ts = (uint64_t)millis_since_boot();
+        msgq_msg_init_data(&msg, (char *)&ts, sizeof(uint64_t));
+        msgq_msg_send(&msg, &w);
+        msgq_msg_close(&msg);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  };
+
+  std::thread thread = std::thread(publish_thread);
+
+  uint32_t msg_cnt = 0;
+  while (true) {
+    int num = msgq_poll(pollitems.data(), pollitems.size(), 100);
+    if (!num) break;
+
+    uint64_t poll_return_ts = (uint64_t)millis_since_boot();
+    for (int i = 0; i < pollitems.size(); ++i) {
+      if (pollitems[i].revents) {
+        msgq_msg_t msg;
+        msgq_msg_recv(&msg, pollitems[i].q);
+
+        REQUIRE(msg.size == sizeof(uint64_t));
+        REQUIRE(*(uint64_t *)msg.data <= (poll_return_ts + 1));  // less than 1 ms
+        ++msg_cnt;
+        ++messages_received[i];
+        msgq_msg_close(&msg);
+      }
+    }
+  }
+  REQUIRE(msg_cnt == queue_cnt * msg_cnt_per_queue);
+  for (int n : messages_received) {
+    REQUIRE(n == msg_cnt_per_queue);
+  }
+  thread.join();
 }
