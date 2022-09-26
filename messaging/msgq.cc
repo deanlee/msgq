@@ -1,19 +1,12 @@
 #include <iostream>
 #include <cassert>
-#include <cerrno>
-#include <cmath>
-#include <cstring>
-#include <cstdint>
 #include <chrono>
-#include <algorithm>
 #include <condition_variable>
-#include <cstdlib>
 #include <csignal>
 #include <mutex>
 #include <random>
 #include <string>
 
-#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -22,12 +15,35 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <stdio.h>
 
 #include "msgq.h"
 
 std::mutex poll_mutex;
 std::condition_variable poll_cv;
+
+struct MSGQSignalHandler {
+  MSGQSignalHandler() {
+    prev_sigint_h = std::signal(SIGINT, sig_handler);
+    prev_sigterm_h = std::signal(SIGTERM, sig_handler);
+  }
+
+  ~MSGQSignalHandler() {
+    if (prev_sigint_h) std::signal(SIGINT, prev_sigint_h);
+    if (prev_sigterm_h) std::signal(SIGINT, prev_sigterm_h);
+  }
+
+  static void sig_handler(int sig) {
+    msgq_do_exit = 1;
+    poll_cv.notify_all();
+
+    if (sig == SIGINT && prev_sigint_h) prev_sigint_h(sig);
+    if (sig == SIGTERM && prev_sigterm_h) prev_sigterm_h(sig);
+  }
+
+  inline static std::atomic<bool> msgq_do_exit = false;
+  inline static sighandler_t prev_sigint_h = nullptr;
+  inline static sighandler_t prev_sigterm_h = nullptr;
+};
 
 void sigusr2_handler(int signal) {
   assert(signal == SIGUSR2);
@@ -427,7 +443,7 @@ int msgq_msg_recv(msgq_msg_t * msg, msgq_queue_t * q){
 }
 
 int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
-  assert(timeout >= 0);
+  static MSGQSignalHandler signal_h;
 
   auto msg_ready = [](msgq_pollitem_t *items, size_t nitems) {
     int num = 0;
@@ -439,16 +455,15 @@ int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
   };
 
   int num = 0;
+  if (timeout == -1) timeout = 24 * 60 * 60 * 60; // 1 day
   while (num == 0 && timeout > 0) {
     double t1 = millis_since_boot();
     std::unique_lock lk(poll_mutex);
     poll_cv.wait_for(lk, std::chrono::milliseconds(timeout), [&]() {
-      num = msg_ready(items, nitems);
-      return num > 0;
+      return signal_h.msgq_do_exit || (num = msg_ready(items, nitems)) > 0;
     });
     timeout -= (millis_since_boot() - t1);
   }
-
   return num;
 }
 

@@ -158,7 +158,6 @@ std::vector<SubSocket*> ZMQPoller::poll(int timeout){
     return r;
   }
 
-  r.reserve(rc);
   for (size_t i = 0; i < num_polls; i++){
     if (polls[i].revents){
       r.push_back(sockets[i]);
