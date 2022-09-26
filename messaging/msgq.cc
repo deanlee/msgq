@@ -428,7 +428,8 @@ int msgq_msg_recv(msgq_msg_t * msg, msgq_queue_t * q){
 
 int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
   assert(timeout >= 0);
-  auto msg_ready = [=]() {
+
+  auto msg_ready = [](msgq_pollitem_t *items, size_t nitems) {
     int num = 0;
     for (size_t i = 0; i < nitems; i++) {
       items[i].revents = msgq_msg_ready(items[i].q);
@@ -437,12 +438,14 @@ int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
     return num;
   };
 
-  int num = msg_ready();
+  int num = 0;
   while (num == 0 && timeout > 0) {
     double t1 = millis_since_boot();
     std::unique_lock lk(poll_mutex);
-    poll_cv.wait_for(lk, std::chrono::milliseconds(timeout));
-    num = msg_ready();
+    poll_cv.wait_for(lk, std::chrono::milliseconds(timeout), [&]() {
+      num = msg_ready(items, nitems);
+      return num > 0;
+    });
     timeout -= (millis_since_boot() - t1);
   }
 
