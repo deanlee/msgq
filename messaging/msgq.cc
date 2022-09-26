@@ -121,10 +121,17 @@ int msgq_new_queue(msgq_queue_t * q, const char * path, size_t size){
   }
   full_path += path;
 
-  auto fd = open(full_path.c_str(), O_RDWR | O_CREAT, 0664);
+  bool existed = true;
+  auto fd = open(full_path.c_str(), O_RDWR, 0664);
   if (fd < 0) {
-    std::cout << "Warning, could not open: " << full_path << std::endl;
-    return -1;
+    fd = open(full_path.c_str(), O_CREAT, 0664);
+    if (fd < 0) {
+      std::cout << "Warning, could not open: " << full_path << std::endl;
+      return -1;
+    }
+    existed = false;
+  } else {
+    printf("************existed\n");
   }
 
   int rc = ftruncate(fd, size + sizeof(msgq_header_t));
@@ -138,12 +145,16 @@ int msgq_new_queue(msgq_queue_t * q, const char * path, size_t size){
   if (mem == NULL){
     return -1;
   }
+  if (!existed) {
+    memset(mem, 0, size + sizeof(msgq_header_t));
+  }
   q->mmap_p = mem;
 
   msgq_header_t *header = (msgq_header_t *)mem;
 
   // Setup pointers to header segment
   q->num_readers = reinterpret_cast<std::atomic<uint64_t>*>(&header->num_readers);
+
   q->write_pointer = reinterpret_cast<std::atomic<uint64_t>*>(&header->write_pointer);
   q->write_uid = reinterpret_cast<std::atomic<uint64_t>*>(&header->write_uid);
 
