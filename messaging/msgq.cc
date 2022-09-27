@@ -206,8 +206,9 @@ void msgq_init_publisher(msgq_queue_t * q) {
     // Wake up reader in case they are in a poll
     thread_signal(old_uid & 0xFFFFFFFF);
   }
-
-  
+  if(q->endpoint.find("visionipc_camerad_0") == 0) {
+    printf("init pub: %s", q->endpoint.c_str());
+  }
 }
 
 
@@ -234,8 +235,12 @@ void msgq_init_subscriber(msgq_queue_t * q) {
         *q->read_uids[i] = 0;
 
         // Wake up reader in case they are in a poll
+        
         thread_signal(old_uid & 0xFFFFFFFF);
       }
+      if (q->endpoint.find("visionipc_camerad_0") == 0) {
+          printf("reset %s\n", q->endpoint.c_str());
+        }
 
       continue;
     }
@@ -253,6 +258,10 @@ void msgq_init_subscriber(msgq_queue_t * q) {
       *q->read_valids[cur_num_readers] = false;
       *q->read_pointers[cur_num_readers] = 0;
       *q->read_uids[cur_num_readers] = uid;
+
+       if (q->endpoint.find("visionipc_camerad_0") == 0) {
+          printf("init sub %lu\n", uid & 0xFFFFFFFF);
+        }
       break;
     }
   }
@@ -297,6 +306,7 @@ int msgq_msg_send(msgq_msg_t * msg, msgq_queue_t *q){
       read_pointer &= 0xFFFFFFFF;
 
       if ((read_pointer > write_pointer) && (read_cycles != write_cycles)) {
+        std::cout << "************reset: " << q->endpoint << std::endl;
         *q->read_valids[i] = false;
       }
     }
@@ -337,9 +347,20 @@ int msgq_msg_send(msgq_msg_t * msg, msgq_queue_t *q){
   PACK64(*q->write_pointer, write_cycles, new_ptr);
 
   // Notify readers
+  int zero = 0;
   for (uint64_t i = 0; i < num_readers; i++){
     uint64_t reader_uid = *q->read_uids[i];
+    if (reader_uid == 0) ++zero;
     thread_signal(reader_uid & 0xFFFFFFFF);
+  }
+  if (q->endpoint.find("visionipc_camerad_0") == 0) {
+    uint64_t d = q->write_pointer->load();
+    printf("notified  writer pointer:%lu %s %d %lu", d, q->endpoint.c_str(), zero, num_readers);
+    for (uint64_t i = 0; i < num_readers; i++) {
+      uint64_t reader_uid = *q->read_uids[i];
+      printf("ids: %lu", reader_uid & 0xFFFFFFFF);
+    }
+    printf("\n");
   }
 
   return msg->size;
@@ -350,15 +371,18 @@ int msgq_msg_ready(msgq_queue_t * q){
  start:
   int id = q->reader_id;
   assert(id >= 0); // Make sure subscriber is initialized
-
+  // if (q->endpoint.find("visionipc_camerad_0") == 0) {
+  //   std::cout << q->endpoint << ": msgq_msg_ready " << (q->read_uid_local & 0xFFFFFFFF) << std::endl;
+  // }
   if (q->read_uid_local != *q->read_uids[id]){
-    //std::cout << q->endpoint << ": Reader was evicted, reconnecting" << std::endl;
+    std::cout << q->endpoint << ": Reader was evicted, reconnecting " << q->endpoint << std::endl;
     msgq_init_subscriber(q);
     goto start;
   }
 
   // Check valid
   if (!*q->read_valids[id]){
+    std::cout << "*************************reset reader " << q->endpoint << std::endl;
     msgq_reset_reader(q);
     goto start;
   }
@@ -370,6 +394,10 @@ int msgq_msg_ready(msgq_queue_t * q){
   UNPACK64(write_cycles, write_pointer, *q->write_pointer);
 
   // Check if new message is available
+  if (q->endpoint.find("visionipc_camerad_0") == 0) {
+    uint64_t d = q->write_pointer->load();
+  if (read_pointer == write_pointer) printf("no new %lu, pointer %lu\n", d, (q->read_uid_local & 0xFFFFFFFF));
+  }
   return (read_pointer != write_pointer);
 }
 
@@ -477,7 +505,9 @@ int msgq_poll(msgq_pollitem_t *items, size_t nitems, int timeout) {
     double t1 = millis_since_boot();
     std::unique_lock lk(poll_mutex);
     poll_cv.wait_for(lk, std::chrono::milliseconds(timeout), [&]() {
-      return signal_h.msgq_do_exit || (num = msg_ready(items, nitems)) > 0;
+      num = msg_ready(items, nitems);
+      // printf("wake up :%d new msg!\n", num);
+      return signal_h.msgq_do_exit || num > 0;
     });
     timeout -= (millis_since_boot() - t1);
   }
