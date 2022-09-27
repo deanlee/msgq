@@ -180,22 +180,6 @@ void msgq_close_queue(msgq_queue_t *q){
   }
 }
 
-
-void msgq_init_publisher(msgq_queue_t * q) {
-  //std::cout << "Starting publisher" << std::endl;
-  uint64_t uid = msgq_get_uid();
-
-  *q->write_uid = uid;
-  *q->num_readers = 0;
-
-  for (size_t i = 0; i < NUM_READERS; i++){
-    *q->read_valids[i] = false;
-    *q->read_uids[i] = 0;
-  }
-
-  q->write_uid_local = uid;
-}
-
 static void thread_signal(uint32_t tid) {
   #ifndef SYS_tkill
     // TODO: this won't work for multithreaded programs
@@ -204,6 +188,28 @@ static void thread_signal(uint32_t tid) {
     syscall(SYS_tkill, tid, SIGUSR2);
   #endif
 }
+
+void msgq_init_publisher(msgq_queue_t * q) {
+  //std::cout << "Starting publisher" << std::endl;
+  uint64_t uid = msgq_get_uid();
+
+  *q->write_uid = uid;
+  *q->num_readers = 0;
+
+  q->write_uid_local = uid;
+  for (size_t i = 0; i < NUM_READERS; i++){
+    *q->read_valids[i] = false;
+    // *q->read_uids[i] = 0;
+    uint64_t old_uid = *q->read_uids[i];
+    *q->read_uids[i] = 0;
+
+    // Wake up reader in case they are in a poll
+    thread_signal(old_uid & 0xFFFFFFFF);
+  }
+
+  
+}
+
 
 void msgq_init_subscriber(msgq_queue_t * q) {
   assert(q != NULL);
