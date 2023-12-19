@@ -57,7 +57,6 @@ int ipc_send(int fd, void *buf, size_t buf_size, int *fds, int num_fds) {
 
   printf("send num_fds %d\n", num_fds);
   char control_buf[CMSG_SPACE(sizeof(int) * num_fds)];
-  memset(control_buf, 0, CMSG_SPACE(sizeof(int) * num_fds));
   if (num_fds > 0) {
     msg.msg_control = control_buf;
     msg.msg_controllen = CMSG_SPACE(sizeof(int) * num_fds);
@@ -81,7 +80,6 @@ int ipc_recv(int fd, void *buf, size_t buf_size, int *fds, int num_fds, int *out
   };
 
   char control_buf[CMSG_SPACE(sizeof(int) * num_fds)];
-  memset(control_buf, 0, CMSG_SPACE(sizeof(int) * num_fds));
   if (num_fds > 0) {
     msg.msg_control = control_buf;
     msg.msg_controllen = CMSG_SPACE(sizeof(int) * num_fds);
