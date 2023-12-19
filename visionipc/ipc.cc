@@ -41,6 +41,7 @@ int ipc_bind(const char *socket_path) {
 
   err = listen(sock, 3);
   assert(err == 0);
+
   return sock;
 }
 
@@ -54,6 +55,7 @@ int ipc_send(int fd, void *buf, size_t buf_size, int *fds, int num_fds) {
       .msg_iovlen = 1,
   };
 
+  printf("send num_fds %d\n", num_fds);
   char control_buf[CMSG_SPACE(sizeof(int) * num_fds)];
   memset(control_buf, 0, CMSG_SPACE(sizeof(int) * num_fds));
   if (num_fds > 0) {
