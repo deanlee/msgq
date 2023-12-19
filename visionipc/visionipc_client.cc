@@ -46,14 +46,13 @@ bool VisionIpcClient::connect(bool blocking){
     return false;
   }
   // Send stream type to server to request FDs
-  int r = ipc_sendrecv_with_fds(true, socket_fd, &type, sizeof(type), nullptr, 0, nullptr);
+  int r = ipc_send(socket_fd, &type, sizeof(type));
   assert(r == sizeof(type));
 
   // Get FDs
   int fds[VISIONIPC_MAX_FDS];
   VisionBuf bufs[VISIONIPC_MAX_FDS];
-  r = ipc_sendrecv_with_fds(false, socket_fd, &bufs, sizeof(bufs), fds, VISIONIPC_MAX_FDS, &num_buffers);
-
+  r = ipc_recv(socket_fd, &bufs, sizeof(bufs), fds, VISIONIPC_MAX_FDS, &num_buffers);
   assert(num_buffers >= 0);
   assert(r == sizeof(VisionBuf) * num_buffers);
 
@@ -120,11 +119,11 @@ std::set<VisionStreamType> VisionIpcClient::getAvailableStreams(const std::strin
   }
   // Send VISION_STREAM_MAX to server to request available streams
   int request = VISION_STREAM_MAX;
-  int r = ipc_sendrecv_with_fds(true, socket_fd, &request, sizeof(request), nullptr, 0, nullptr);
+  int r = ipc_send(socket_fd, &request, sizeof(request));
   assert(r == sizeof(request));
 
   VisionStreamType available_streams[VISION_STREAM_MAX] = {};
-  r = ipc_sendrecv_with_fds(false, socket_fd, &available_streams, sizeof(available_streams), nullptr, 0, nullptr);
+  r = ipc_recv(socket_fd, &available_streams, sizeof(available_streams));
   assert((r >= 0) && (r % sizeof(VisionStreamType) == 0));
   close(socket_fd);
   return std::set<VisionStreamType>(available_streams, available_streams + r / sizeof(VisionStreamType));
