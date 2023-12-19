@@ -1,9 +1,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -46,16 +43,8 @@ int ipc_bind(const char *socket_path) {
 }
 
 int ipc_send(int fd, void *buf, size_t buf_size, int *fds, int num_fds) {
-  struct iovec iov = {
-      .iov_base = buf,
-      .iov_len = buf_size,
-  };
-  struct msghdr msg = {
-      .msg_iov = &iov,
-      .msg_iovlen = 1,
-  };
-
-  printf("send num_fds %d\n", num_fds);
+  struct iovec iov = {.iov_base = buf, .iov_len = buf_size};
+  struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1};
   char control_buf[CMSG_SPACE(sizeof(int) * num_fds)];
   if (num_fds > 0) {
     msg.msg_control = control_buf;
@@ -70,25 +59,16 @@ int ipc_send(int fd, void *buf, size_t buf_size, int *fds, int num_fds) {
 }
 
 int ipc_recv(int fd, void *buf, size_t buf_size, int *fds, int num_fds, int *out_num_fds) {
-  struct iovec iov = {
-      .iov_base = buf,
-      .iov_len = buf_size,
-  };
-  struct msghdr msg = {
-      .msg_iov = &iov,
-      .msg_iovlen = 1,
-  };
-
+  struct iovec iov = {.iov_base = buf, .iov_len = buf_size};
+  struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1};
   char control_buf[CMSG_SPACE(sizeof(int) * num_fds)];
   if (num_fds > 0) {
     msg.msg_control = control_buf;
     msg.msg_controllen = CMSG_SPACE(sizeof(int) * num_fds);
   }
-
   int r = recvmsg(fd, &msg, 0);
   if (r < 0) return r;
 
-  printf("num_fds %d, buf size %zu %d\n", num_fds, msg.msg_controllen, r);
   if (msg.msg_controllen > 0) {
     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
     assert(cmsg);
