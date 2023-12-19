@@ -1,9 +1,6 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -20,9 +17,7 @@ int ipc_connect(const char *socket_path) {
   int sock = getsocket();
   if (sock < 0) return -1;
 
-  struct sockaddr_un addr = {
-      .sun_family = AF_UNIX,
-  };
+  struct sockaddr_un addr = {.sun_family = AF_UNIX};
   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket_path);
   int err = connect(sock, (struct sockaddr *)&addr, sizeof(addr));
   if (err != 0) {
@@ -33,22 +28,16 @@ int ipc_connect(const char *socket_path) {
 }
 
 int ipc_bind(const char *socket_path) {
-  int err;
-
   unlink(socket_path);
 
   int sock = getsocket();
-
-  struct sockaddr_un addr = {
-      .sun_family = AF_UNIX,
-  };
+  struct sockaddr_un addr = {.sun_family = AF_UNIX};
   snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket_path);
-  err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+  int err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
   assert(err == 0);
 
   err = listen(sock, 3);
   assert(err == 0);
-
   return sock;
 }
 
@@ -96,7 +85,6 @@ int ipc_recv(int fd, void *buf, size_t buf_size, int *fds, int num_fds, int *out
   int r = recvmsg(fd, &msg, 0);
   if (r < 0) return r;
 
-  printf("buf size %zu %d\n", msg.msg_controllen, r);
   if (msg.msg_controllen > 0) {
     struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
     assert(cmsg);
