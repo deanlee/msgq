@@ -79,10 +79,10 @@ Message * MSGQSubSocket::receive(bool non_blocking){
   if (rc == 0 && !non_blocking) {
     int ms = (timeout == -1) ? 100 : timeout;
     struct timespec ts = {ms / 1000, (ms % 1000) * 1000 * 1000};
-    while (rc == 0) {
+    while (true) {
       int err = nanosleep(&ts, &ts);
       rc = msgq_msg_recv(&msg, q);
-      if (err == 0) {
+      if (err == 0 || rc > 0) {
         break;
       }
     }
