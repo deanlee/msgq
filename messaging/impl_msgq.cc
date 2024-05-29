@@ -1,19 +1,39 @@
+#include <atomic>
 #include <cassert>
 #include <cstring>
 #include <iostream>
 #include <cstdlib>
 #include <csignal>
 #include <cerrno>
+#include <mutex>
 
 #include "cereal/services.h"
 #include "cereal/messaging/impl_msgq.h"
 
-
-volatile sig_atomic_t msgq_do_exit = 0;
+std::once_flag once_flag;
+std::atomic<bool> msgq_do_exit = false;
+void (*prev_handler_sigint)(int) = nullptr;
+void (*prev_handler_sigterm)(int) = nullptr;
 
 void sig_handler(int signal) {
   assert(signal == SIGINT || signal == SIGTERM);
   msgq_do_exit = 1;
+  if (signal == SIGINT && prev_handler_sigint) {
+    prev_handler_sigint(signal);
+  } else if (signal == SIGTERM && prev_handler_sigterm) {
+    prev_handler_sigterm(signal);
+  }
+}
+
+void install_signal_handler() {
+  auto prev_handler = std::signal(SIGINT, sig_handler);
+  if (prev_handler && prev_handler != SIG_ERR && prev_handler != SIG_DFL && prev_handler != SIG_IGN) {
+    prev_handler_sigint = prev_handler;
+  }
+  prev_handler = std::signal(SIGTERM, sig_handler);
+  if (prev_handler && prev_handler != SIG_ERR && prev_handler != SIG_DFL && prev_handler != SIG_IGN) {
+    prev_handler_sigterm = prev_handler;
+  }
 }
 
 static bool service_exists(std::string path){
@@ -22,6 +42,7 @@ static bool service_exists(std::string path){
 
 
 MSGQContext::MSGQContext() {
+  std::call_once(once_flag, install_signal_handler);
 }
 
 MSGQContext::~MSGQContext() {
@@ -81,21 +102,10 @@ int MSGQSubSocket::connect(Context *context, std::string endpoint, std::string a
 
 
 Message * MSGQSubSocket::receive(bool non_blocking){
-  msgq_do_exit = 0;
-
-  void (*prev_handler_sigint)(int);
-  void (*prev_handler_sigterm)(int);
-  if (!non_blocking){
-    prev_handler_sigint = std::signal(SIGINT, sig_handler);
-    prev_handler_sigterm = std::signal(SIGTERM, sig_handler);
-  }
-
   msgq_msg_t msg;
-
   MSGQMessage *r = NULL;
 
   int rc = msgq_msg_recv(&msg, q);
-
   // Hack to implement blocking read with a poller. Don't use this
   while (!non_blocking && rc == 0 && msgq_do_exit == 0){
     msgq_pollitem_t items[1];
@@ -115,14 +125,6 @@ Message * MSGQSubSocket::receive(bool non_blocking){
       break;
     }
   }
-
-
-  if (!non_blocking){
-    std::signal(SIGINT, prev_handler_sigint);
-    std::signal(SIGTERM, prev_handler_sigterm);
-  }
-
-  errno = msgq_do_exit ? EINTR : 0;
 
   if (rc > 0){
     if (msgq_do_exit){
