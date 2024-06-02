@@ -9,6 +9,7 @@ import time
 
 from typing import Optional, List, Union, Dict, Deque
 from collections import deque
+from dataclasses import dataclass, field
 
 from cereal import log
 from cereal.services import SERVICE_LIST
@@ -141,27 +142,30 @@ def recv_one_retry(sock: SubSocket) -> capnp.lib.capnp._DynamicStructReader:
       return log_from_bytes(dat)
 
 
+@dataclass
+class ServiceData:
+  sock: SubSocket = None
+  seen: bool = False
+  updated: bool = False
+  recv_time: float = 0.0
+  recv_frame: int = 0
+  alive: bool = False
+  freq_ok: bool = False
+  recv_dts: Deque[float] = field(default_factory=deque)
+  data: Optional[capnp.lib.capnp._DynamicStructReader] = None
+  valid: bool = True # FIXME: this should default to False
+  logMonoTime: int = 0
+  max_freq: float = 0.0
+  min_freq: float = 0.0
+
 class SubMaster:
   def __init__(self, services: List[str], poll: Optional[str] = None,
                ignore_alive: Optional[List[str]] = None, ignore_avg_freq: Optional[List[str]] = None,
                ignore_valid: Optional[List[str]] = None, addr: str = "127.0.0.1", frequency: Optional[float] = None):
     self.frame = -1
-    self.seen = {s: False for s in services}
-    self.updated = {s: False for s in services}
-    self.recv_time = {s: 0. for s in services}
-    self.recv_frame = {s: 0 for s in services}
-    self.alive = {s: False for s in services}
-    self.freq_ok = {s: False for s in services}
-    self.recv_dts: Dict[str, Deque[float]] = {}
-    self.sock = {}
-    self.data = {}
-    self.valid = {}
-    self.logMonoTime = {}
-
-    self.max_freq = {}
-    self.min_freq = {}
-
     self.poller = Poller()
+    self.services: Dict[str, ServiceData] = {s: ServiceData() for s in services}
+
     polled_services = set([poll, ] if poll is not None else services)
     self.non_polled_services = set(services) - polled_services
 
@@ -177,16 +181,14 @@ class SubMaster:
 
     for s in services:
       p = self.poller if s not in self.non_polled_services else None
-      self.sock[s] = sub_sock(s, poller=p, addr=addr, conflate=True)
+      self.services[s].sock = sub_sock(s, poller=p, addr=addr, conflate=True)
 
       try:
         data = new_message(s)
       except capnp.lib.capnp.KjException:
         data = new_message(s, 0) # lists
 
-      self.data[s] = getattr(data.as_reader(), s)
-      self.logMonoTime[s] = 0
-      self.valid[s] = True  # FIXME: this should default to False
+      self.services[s].data = getattr(data.as_reader(), s)
 
       freq = max(min([SERVICE_LIST[s].frequency, self.update_freq]), 1.)
       if s == poll:
@@ -200,12 +202,15 @@ class SubMaster:
           min_freq = freq
         else:
           min_freq = min(freq, freq / 2.)
-      self.max_freq[s] = max_freq*1.2
-      self.min_freq[s] = min_freq*0.8
-      self.recv_dts[s] = deque(maxlen=int(10*freq))
+      self.services[s].max_freq = max_freq*1.2
+      self.services[s].min_freq = min_freq*0.8
+      self.services[s].recv_dts = deque(maxlen=int(10*freq))
 
+  @property
+  def updated(self):
+    return
   def __getitem__(self, s: str) -> capnp.lib.capnp._DynamicStructReader:
-    return self.data[s]
+    return self.services[s].data
 
   def _check_avg_freq(self, s: str) -> bool:
     return SERVICE_LIST[s].frequency > 0.99 and (s not in self.ignore_average_freq) and (s not in self.ignore_alive)
@@ -217,35 +222,38 @@ class SubMaster:
 
     # non-blocking receive for non-polled sockets
     for s in self.non_polled_services:
-      msgs.append(recv_one_or_none(self.sock[s]))
+      msgs.append(recv_one_or_none(self.services[s].sock))
     self.update_msgs(time.monotonic(), msgs)
 
   def update_msgs(self, cur_time: float, msgs: List[capnp.lib.capnp._DynamicStructReader]) -> None:
     self.frame += 1
-    self.updated = dict.fromkeys(self.updated, False)
+    for s in self.services:
+      self.services[s].updated = False
+
     for msg in msgs:
       if msg is None:
         continue
 
       s = msg.which()
-      self.seen[s] = True
-      self.updated[s] = True
+      service_data = self.services[s]
+      service_data.seen = True
+      service_data.updated = True
 
-      if self.recv_time[s] > 1e-5:
-        self.recv_dts[s].append(cur_time - self.recv_time[s])
-      self.recv_time[s] = cur_time
-      self.recv_frame[s] = self.frame
-      self.data[s] = getattr(msg, s)
-      self.logMonoTime[s] = msg.logMonoTime
-      self.valid[s] = msg.valid
+      if service_data.recv_time > 1e-5:
+        service_data.recv_dts.append(cur_time - service_data.recv_time)
+      service_data.recv_time = cur_time
+      service_data.recv_frame = self.frame
+      service_data.data = getattr(msg, s)
+      service_data.logMonoTime = msg.logMonoTime
+      service_data.valid = msg.valid
 
-    for s in self.data:
+    for s, service_data in self.services.items():
       if SERVICE_LIST[s].frequency > 1e-5 and not self.simulation:
         # alive if delay is within 10x the expected frequency
-        self.alive[s] = (cur_time - self.recv_time[s]) < (10. / SERVICE_LIST[s].frequency)
+        service_data.alive = (cur_time - service_data.recv_time) < (10. / SERVICE_LIST[s].frequency)
 
         # check average frequency; slow to fall, quick to recover
-        dts = self.recv_dts[s]
+        dts = service_data.recv_dts
         assert dts.maxlen is not None
         recent_dts = list(dts)[-int(dts.maxlen / 10):]
         try:
@@ -255,30 +263,30 @@ class SubMaster:
           avg_freq = 0
           avg_freq_recent = 0
 
-        avg_freq_ok = self.min_freq[s] <= avg_freq <= self.max_freq[s]
-        recent_freq_ok = self.min_freq[s] <= avg_freq_recent <= self.max_freq[s]
-        self.freq_ok[s] = avg_freq_ok or recent_freq_ok
+        avg_freq_ok = service_data.min_freq <= avg_freq <= service_data.max_freq
+        recent_freq_ok = service_data.min_freq <= avg_freq_recent <= service_data.max_freq
+        service_data.freq_ok = avg_freq_ok or recent_freq_ok
       else:
-        self.freq_ok[s] = True
+        service_data.freq_ok = True
         if self.simulation:
-          self.alive[s] = self.seen[s] # alive is defined as seen when simulation flag set
+          service_data.alive = service_data.seen # alive is defined as seen when simulation flag set
         else:
-          self.alive[s] = True
+          service_data.alive = True
 
   def all_alive(self, service_list: Optional[List[str]] = None) -> bool:
     if service_list is None:
-      service_list = list(self.sock.keys())
-    return all(self.alive[s] for s in service_list if s not in self.ignore_alive)
+      service_list = list(self.services.keys())
+    return all(self.services[s].alive for s in service_list if s not in self.ignore_alive)
 
   def all_freq_ok(self, service_list: Optional[List[str]] = None) -> bool:
     if service_list is None:
-      service_list = list(self.sock.keys())
-    return all(self.freq_ok[s] for s in service_list if self._check_avg_freq(s))
+      service_list = list(self.services.keys())
+    return all(self.services[s].freq_ok for s in service_list if self._check_avg_freq(s))
 
   def all_valid(self, service_list: Optional[List[str]] = None) -> bool:
     if service_list is None:
-      service_list = list(self.sock.keys())
-    return all(self.valid[s] for s in service_list if s not in self.ignore_valid)
+      service_list = list(self.services.keys())
+    return all(self.services[s].valid for s in service_list if s not in self.ignore_valid)
 
   def all_checks(self, service_list: Optional[List[str]] = None) -> bool:
     return self.all_alive(service_list) and self.all_freq_ok(service_list) and self.all_valid(service_list)
