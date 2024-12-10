@@ -25,10 +25,6 @@
 
 #include "msgq/msgq.h"
 
-void sigusr2_handler(int signal) {
-  assert(signal == SIGUSR2);
-}
-
 uint64_t msgq_get_uid(void){
   std::random_device rd("/dev/urandom");
   std::uniform_int_distribution<uint64_t> distribution(0, std::numeric_limits<uint32_t>::max());
@@ -85,7 +81,6 @@ void msgq_wait_for_subscriber(msgq_queue_t *q){
 
 int msgq_new_queue(msgq_queue_t * q, const char * path, size_t size){
   assert(size < 0xFFFFFFFF); // Buffer must be smaller than 2^32 bytes
-  std::signal(SIGUSR2, sigusr2_handler);
 
   std::string full_path = "/dev/shm/";
   const char* prefix = std::getenv("OPENPILOT_PREFIX");
@@ -158,13 +153,22 @@ void msgq_init_publisher(msgq_queue_t * q) {
   q->write_uid_local = uid;
 }
 
-static void thread_signal(uint32_t tid) {
-  #ifndef SYS_tkill
-    // TODO: this won't work for multithreaded programs
-    kill(tid, SIGUSR2);
-  #else
-    syscall(SYS_tkill, tid, SIGUSR2);
-  #endif
+sem_t *get_sem(msgq_queue_t *q, uint32_t tid) {
+    sem_t *sem = nullptr;
+  auto it = q->semapores.find(tid);
+  if (it != q->semapores.end()) {
+    sem = it->second;
+  } else {
+    char name[256];
+    snprintf(name, sizeof(name), "opmsgq-%d", tid);
+    sem = sem_open(name, O_CREAT, 0644, 0);
+    q->semapores[tid] = sem;
+  }
+  return sem;
+}
+
+static void thread_signal(msgq_queue_t *q, uint32_t tid) {
+  sem_post(get_sem(q, tid));
 }
 
 void msgq_init_subscriber(msgq_queue_t * q) {
@@ -190,7 +194,7 @@ void msgq_init_subscriber(msgq_queue_t * q) {
         *q->read_uids[i] = 0;
 
         // Wake up reader in case they are in a poll
-        thread_signal(old_uid & 0xFFFFFFFF);
+        thread_signal(q, old_uid);// & 0xFFFFFFFF);
       }
 
       continue;
@@ -295,7 +299,8 @@ int msgq_msg_send(msgq_msg_t * msg, msgq_queue_t *q){
   // Notify readers
   for (uint64_t i = 0; i < num_readers; i++){
     uint64_t reader_uid = *q->read_uids[i];
-    thread_signal(reader_uid & 0xFFFFFFFF);
+    // thread_signal(reader_uid & 0xFFFFFFFF);
+    thread_signal(q, reader_uid);
   }
 
   return msg->size;

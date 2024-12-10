@@ -4,6 +4,8 @@
 #include <cstring>
 #include <string>
 #include <atomic>
+#include <semaphore.h>
+#include <unordered_map>
 
 #define DEFAULT_SEGMENT_SIZE (10 * 1024 * 1024)
 #define NUM_READERS 15
@@ -38,6 +40,7 @@ struct msgq_queue_t {
 
   bool read_conflate;
   std::string endpoint;
+  std::unordered_map<uint64_t, sem_t *> semapores;
 };
 
 struct msgq_msg_t {
